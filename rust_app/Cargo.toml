@@ -4,3 +4,11 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
+sqlx = { version = "0.7", features = ["postgres", "runtime-tokio", "macros"] }
+tokio = { version = "1", features = ["full"] }
+dotenvy = "0.15" # for loading .env variables
+bcrypt = "0.15"
+jsonwebtoken = "9" # for JWT auth
+serde = { version = "1", features = ["derive"] }
+chrono = "0.4"
+rpassword = "7.2"
