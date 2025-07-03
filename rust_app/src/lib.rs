@@ -1,5 +1,4 @@
-use std::{error::Error, process};
-
+use std::{error::Error, process, io};
 pub struct Args{
     init_command: String,
     query: String
@@ -31,11 +30,20 @@ pub fn start() -> Result<(), Box<dyn Error>>{
 
     Ok(())
 }
+pub fn login() -> Result<(), Box<dyn Error>>{
+    Ok(())
+}
+pub fn register() -> Result<(), Box<dyn Error>>{
+    Ok(())
+}
 
 pub fn run(items:&[String]){
     let _args = Args::parse_args(items).unwrap_or_else(|err| {
         eprintln!("Error parsing arguments: {}", err);
         process::exit(1);
     });
-    
+    if _args.query == "start"{
+        let mut username = String::new();
+        io::stdin().read_line(&mut username).expect("Error reading username");
+    }
 }
