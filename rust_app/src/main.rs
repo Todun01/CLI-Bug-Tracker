@@ -1,6 +1,9 @@
 use rust_app;
 use std::env;
-fn main() {
+
+
+#[tokio::main]
+async fn main() {
     let mut _args:Vec<String> = env::args().collect();
-    println!("Hello, world!");
+    rust_app::run(&_args).await;
 }

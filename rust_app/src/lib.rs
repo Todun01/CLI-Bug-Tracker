@@ -1,7 +1,7 @@
 use std::{error::Error, io::{self, Write}, process};
 use bcrypt::{hash, verify, DEFAULT_COST};
 use dotenvy::dotenv;
-use sqlx::postgres::PgPoolOptions;
+use sqlx::{postgres::PgPoolOptions, Pool, Postgres};
 use std::env;
 use rpassword::read_password;
 pub struct Args{
@@ -35,7 +35,13 @@ impl Args  {
 }
 
 pub async fn start() -> Result<(), Box<dyn Error>>{
+    dotenv().ok();
+    let db_url = env::var("DATABASE_URL").expect("DATABASE_URL not set");
 
+    let pool = PgPoolOptions::new()
+        .max_connections(5)
+        .connect(&db_url)
+        .await?;
     //login prompt
     println!("Please enter your username: ");
     io::stdout().flush().unwrap();
@@ -52,35 +58,59 @@ pub async fn start() -> Result<(), Box<dyn Error>>{
     .fetch_optional(&pool)
     .await?;
     if let Some(user) = user{
-        if let Err(e) = login(user){
+        if let Err(e) = login(&username, pool).await{
             eprintln!("Application error: {}", e);
             process::exit(1)
         }
-    } 
-    println!("Username not found");
-    println!("Do you want to register?(Y/n)");
-    io::stdout().flush().unwrap();
+    } else{
+        println!("{}", username);
+        println!("Username not found");
+        println!("Do you want to register?(Y/n)");
+        io::stdout().flush().unwrap();
 
-    let mut response = String::new();
-    io::stdin().read_line(&mut response).expect("Error reading response.");
-    if response.trim() == "Y"{
-        if let Err(e) = register(){
-            eprintln!("Application error: {}", e);
-            process::exit(1)
+        let mut response = String::new();
+        io::stdin().read_line(&mut response).expect("Error reading response.");
+        if response.trim() == "Y"{
+            if let Err(e) = register(){
+                eprintln!("Application error: {}", e);
+                process::exit(1)
+            }
         }
-    }else{
-        start();
     }
+    
     Ok(())
 }
-pub fn login(user) -> Result<(), Box<dyn Error>>{
+pub async fn login(username:&str, _pool:Pool<Postgres>) -> Result<(), Box<dyn Error>>{
+    let user = sqlx::query!(
+        "SELECT id, username, password FROM users WHERE username = $1",
+        username
+    )
+    .fetch_optional(&_pool)
+    .await?;
+    match user {
+        Some(user) => {
+            println!("✅ User found.");
+            print!("Enter your password: ");
+            io::stdout().flush().unwrap();
+            let password = read_password().unwrap();
+            match verify(&password, &user.password) {
+                Ok(true) => println!("✅ Logged in successfully!"),
+                Ok(false) => println!("❌ Incorrect password."),
+                Err(_) => println!("❌ Failed to verify password."),
+            }
+        }
+        None => {
+            println!("❌ User not found.");
+        }
+    }
+
     Ok(())
 }
 pub fn register() -> Result<(), Box<dyn Error>>{
     Ok(())
 }
 
-pub fn run(items:&[String]){
+pub async fn run(items:&[String]){
     let _args = Args::parse_args(items).unwrap_or_else(|err| {
         eprintln!("Error parsing arguments: {}", err);
         process::exit(1);
@@ -88,6 +118,7 @@ pub fn run(items:&[String]){
     if _args.query == "start"{
         //welcome prompt
         println!("🔧 Welcome to TRACER: A CLI BUg Tracker🔧");
+        start().await.expect("Failed to start");
     }
 }
 
@@ -99,5 +130,5 @@ mod tests{
 
 #[test]
 fn login_test(){
-
+    //login prompt
 }
