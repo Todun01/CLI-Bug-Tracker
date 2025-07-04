@@ -76,6 +76,15 @@ pub async fn start() -> Result<(), Box<dyn Error>>{
                 process::exit(1)
             }
         }
+        else if response.trim() == "n"{
+            println!("Alright, try again.");
+            io::stdout().flush().unwrap();
+            process::exit(1)
+        }
+        else{
+            eprintln!("Unrecognized response.");
+        }
+        
     }
     
     Ok(())
@@ -107,6 +116,7 @@ pub async fn login(username:&str, _pool:Pool<Postgres>) -> Result<(), Box<dyn Er
     Ok(())
 }
 pub fn register() -> Result<(), Box<dyn Error>>{
+    
     Ok(())
 }
 
