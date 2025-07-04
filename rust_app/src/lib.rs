@@ -71,7 +71,7 @@ pub async fn start() -> Result<(), Box<dyn Error>>{
         let mut response = String::new();
         io::stdin().read_line(&mut response).expect("Error reading response.");
         if response.trim() == "Y"{
-            if let Err(e) = register(){
+            if let Err(e) = register(pool).await{
                 eprintln!("Application error: {}", e);
                 process::exit(1)
             }
@@ -115,8 +115,27 @@ pub async fn login(username:&str, _pool:Pool<Postgres>) -> Result<(), Box<dyn Er
 
     Ok(())
 }
-pub fn register() -> Result<(), Box<dyn Error>>{
-    
+pub async fn register(pooL:Pool<Postgres>) -> Result<(), Box<dyn Error>>{
+    println!("Please enter a username:");
+    io::stdout().flush().unwrap();
+    let mut _username = String::new();
+    io::stdin().read_line(& mut _username).expect("Failed to read username");
+
+    println!("Please enter a password:");
+    io::stdout().flush().unwrap();
+    let mut _password = String::new();
+    io::stdin().read_line(& mut _password).expect("Failed to read password");
+
+    let hashed_password = hash(_password, DEFAULT_COST).expect("Failed to hash password");
+
+    let result = sqlx::query!(
+        "INSERT INTO users (username, password) VALUES ($1, $2)", 
+        _username,
+        hashed_password).execute(&pooL).await;
+    match result{
+        Ok(_) => println!("User created successfully."),
+        Err(e) => println!("Error creating user: {}", e)
+    }
     Ok(())
 }
 
