@@ -1,9 +1,12 @@
-use std::{error::Error, io::{self, Write}, process};
+use std::{error::Error, f32::consts::E, io::{self, Write}, process};
 use bcrypt::{hash, verify, DEFAULT_COST};
 use dotenvy::dotenv;
 use sqlx::{postgres::PgPoolOptions, Pool, Postgres};
 use std::env;
 use rpassword::read_password;
+use std::pin::Pin;
+use std::future::Future;
+
 pub struct Args{
     init_command: String,
     query: String
@@ -14,12 +17,15 @@ extern crate sqlx;
 
 impl Args  {
     pub fn parse_args(_args: &[String]) -> Result <Args, String>{
+        // if _args[0].trim().to_lowercase() != "target/debug/rust_app"{
+        // }
         if _args.len() < 3{
             return Err(format!("You need to enter more arguments"))
         }
         if _args.len() > 3{
             return Err(format!("You entered too many arguments"))
         }
+        // println!("{}", _args[0]);
         let init_command = _args[1].clone();
         let query = _args[2].clone();
         if init_command != "tracer"{
@@ -34,60 +40,62 @@ impl Args  {
     }
 }
 
-pub async fn start() -> Result<(), Box<dyn Error>>{
+pub async fn start() -> Pin<Box<dyn Future<Output = Result<(), Box<dyn Error>>>>>{
     dotenv().ok();
     let db_url = env::var("DATABASE_URL").expect("DATABASE_URL not set");
-
-    let pool = PgPoolOptions::new()
+    Box::pin(async move{
+        let pool = PgPoolOptions::new()
         .max_connections(5)
         .connect(&db_url)
         .await?;
-    //login prompt
-    println!("Please enter your username: ");
-    io::stdout().flush().unwrap();
-
-    let mut _username = String::new();
-    io::stdin().read_line(&mut _username).expect("Error reading username");
-    let username: String = _username.trim().to_string();
-
-    // check if user exists
-    let user = sqlx::query!(
-        "SELECT id, username, password FROM users WHERE username = $1",
-        username
-    )
-    .fetch_optional(&pool)
-    .await?;
-    if let Some(user) = user{
-        if let Err(e) = login(&username, pool).await{
-            eprintln!("Application error: {}", e);
-            process::exit(1)
-        }
-    } else{
-        println!("{}", username);
-        println!("Username not found");
-        println!("Do you want to register?(Y/n)");
+        //login prompt
+        println!("Please enter your username: ");
         io::stdout().flush().unwrap();
 
-        let mut response = String::new();
-        io::stdin().read_line(&mut response).expect("Error reading response.");
-        if response.trim() == "Y"{
-            if let Err(e) = register(pool).await{
+        let mut _username = String::new();
+        io::stdin().read_line(&mut _username).expect("Error reading username");
+        let username: String = _username.trim().to_string();
+
+        // check if user exists
+        let user = sqlx::query!(
+            "SELECT id, username, password FROM users WHERE username = $1",
+            username
+        )
+        .fetch_optional(&pool)
+        .await?;
+        if let Some(user) = user{
+            if let Err(e) = login(&username, pool).await{
                 eprintln!("Application error: {}", e);
                 process::exit(1)
             }
-        }
-        else if response.trim() == "n"{
-            println!("Alright, try again.");
+        } else{
+            println!("{}", username);
+            println!("Username not found");
+            println!("Do you want to register?(Y/n)");
             io::stdout().flush().unwrap();
-            process::exit(1)
-        }
-        else{
-            eprintln!("Unrecognized response.");
+
+            let mut response = String::new();
+            io::stdin().read_line(&mut response).expect("Error reading response.");
+            if response.trim() == "Y"{
+                if let Err(e) = register(pool).await{
+                    eprintln!("Application error: {}", e);
+                    process::exit(1)
+                }
+            }
+            else if response.trim() == "n"{
+                println!("Alright, try again.");
+                io::stdout().flush().unwrap();
+                process::exit(1)
+            }
+            else{
+                eprintln!("Unrecognized response.");
+            }
+            
         }
         
-    }
+        Ok(())
+    })
     
-    Ok(())
 }
 pub async fn login(username:&str, _pool:Pool<Postgres>) -> Result<(), Box<dyn Error>>{
     let user = sqlx::query!(
@@ -98,15 +106,39 @@ pub async fn login(username:&str, _pool:Pool<Postgres>) -> Result<(), Box<dyn Er
     .await?;
     match user {
         Some(user) => {
-            println!("✅ User found.");
+            println!("User found.✅");
             print!("Enter your password: ");
             io::stdout().flush().unwrap();
-            let password = read_password().unwrap();
-            match verify(&password, &user.password) {
-                Ok(true) => println!("✅ Logged in successfully!"),
-                Ok(false) => println!("❌ Incorrect password."),
-                Err(_) => println!("❌ Failed to verify password."),
+            let mut isPassword = false;
+            while !isPassword {
+                let password = read_password().unwrap();
+                match verify(&password, &user.password) {
+                    Ok(true) => {
+                        isPassword = true;
+                        println!("User authenticated! Welcome {}", &user.username);
+                        println!("What would you like to do today?");
+                        io::stdout().flush().unwrap();
+                        let mut command = String::new();
+                        io::stdin().read_line(&mut command).expect("Error reading command");
+                        let mut items: Vec<String> = command
+                            .trim()
+                            .split(' ')
+                            .map(|s| s.trim().to_string())
+                            .filter(|s| !s.is_empty())
+                            .collect();
+                        items.insert(0, "tracerapp".to_string());
+                        if let Err(e) = run(&items).await{
+                            eprintln!("Application error: {}", e);
+                            process::exit(1);
+                        }
+                    },
+                    Ok(false) => {
+                        println!("Incorrect password.Please try again:");
+                    },
+                    Err(_) => println!("Failed to verify password.❌"),
+                }
             }
+            
         }
         None => {
             println!("❌ User not found.");
@@ -132,14 +164,39 @@ pub async fn register(pooL:Pool<Postgres>) -> Result<(), Box<dyn Error>>{
         "INSERT INTO users (username, password) VALUES ($1, $2)", 
         _username.trim(),
         hashed_password).execute(&pooL).await;
+    
     match result{
-        Ok(_) => println!("User created successfully."),
+        Ok(_) => {
+            println!("User created successfully.");
+            println!("Do you want to login?(Y/n)");
+            io::stdout().flush().unwrap();
+            let mut response = String::new();
+            io::stdin().read_line(&mut response).expect("Error reading response");
+
+            if response.trim() == "Y"{
+                println!("Please enter your username:");
+                io::stdout().flush().unwrap();
+                let mut username = String::new();
+                io::stdin().read_line(&mut username).expect("Error reading username");
+                if let Err(e) = login(&username.trim(), pooL).await{
+                    eprintln!("Application error: {}", e);
+                    process::exit(1);
+                }
+            } else if  response.trim() == "n"{
+                println!("Alright, try again.");
+                io::stdout().flush().unwrap();
+                process::exit(1)
+            } else {
+                println!("Unrecognized response.");
+                process::exit(1);
+            }
+        },
         Err(e) => println!("Error creating user: {}", e)
     }
     Ok(())
 }
 
-pub async fn run(items:&[String]){
+pub async fn run(items:&[String]) -> Result<(), Box<dyn Error>>{
     let _args = Args::parse_args(items).unwrap_or_else(|err| {
         eprintln!("Error parsing arguments: {}", err);
         process::exit(1);
@@ -147,8 +204,12 @@ pub async fn run(items:&[String]){
     if _args.query == "start"{
         //welcome prompt
         println!("🔧 Welcome to TRACER: A CLI BUg Tracker🔧");
-        start().await.expect("Failed to start");
+        start().await.await.expect("Failed to start");
     }
+    if _args.query == "log"{
+        println!("Log something")
+    }
+    Ok(())
 }
 
 #[cfg(test)]
