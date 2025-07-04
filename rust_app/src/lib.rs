@@ -132,3 +132,10 @@ mod tests{
 fn login_test(){
     //login prompt
 }
+
+#[test]
+
+fn hasing(){
+    let hashed = hash("1234", DEFAULT_COST).unwrap();
+    println!("Hashed: {}", hashed);
+}
