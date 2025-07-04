@@ -126,11 +126,11 @@ pub async fn register(pooL:Pool<Postgres>) -> Result<(), Box<dyn Error>>{
     let mut _password = String::new();
     io::stdin().read_line(& mut _password).expect("Failed to read password");
 
-    let hashed_password = hash(_password, DEFAULT_COST).expect("Failed to hash password");
+    let hashed_password = hash(_password.trim(), DEFAULT_COST).expect("Failed to hash password");
 
     let result = sqlx::query!(
         "INSERT INTO users (username, password) VALUES ($1, $2)", 
-        _username,
+        _username.trim(),
         hashed_password).execute(&pooL).await;
     match result{
         Ok(_) => println!("User created successfully."),
