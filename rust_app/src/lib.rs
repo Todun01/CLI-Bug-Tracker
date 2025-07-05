@@ -70,6 +70,13 @@ pub async fn start() -> Pin<Box<dyn Future<Output = Result<(), Box<dyn Error>>>>
         .max_connections(5)
         .connect(&db_url)
         .await?;
+        // delete closed bugs after 1 day
+        sqlx::query!(
+            "DELETE FROM bugs WHERE status = $1 AND updated_at < NOW() - INTERVAL '1 day'",
+            "closed"
+        )
+        .execute(&pool)
+        .await?;
         //login prompt
         println!("Please enter your username: ");
         io::stdout().flush().unwrap();
@@ -248,8 +255,20 @@ pub async fn log(user_id: i32, _pool: Pool<Postgres>) ->Result<(), Box<dyn Error
     )
     .execute(&_pool)
     .await?;
-
     println!("Bug logged successfully.✅");
+    let all_bugs = sqlx::query!(
+        "SELECT name, description, status FROM bugs WHERE user_id = $1",
+        user_id
+    ).fetch_all(&_pool)
+    .await?;
+    println!("Here are your logged bugs:");
+    println!("  Bug Name  |  Bug Description  |  Status  ");
+    for bug in all_bugs{
+        println!("  {}  |  {:?}  |  {}  ", 
+        bug.name, 
+        bug.description.unwrap_or("no description".to_string()), 
+        bug.status)
+    }
     Ok(())
 }
 pub async fn run(items:&[String]) -> Result<(), Box<dyn Error>>{
@@ -275,6 +294,9 @@ pub async fn run_in_session<'a>(items:&[String], user:AuthUser<'a>, pool:Pool<Po
             eprintln!("Application error: {}", e);
             process::exit(1)
         }
+    }
+    if _args.query == "view"{
+
     }
     Ok(())
 }
