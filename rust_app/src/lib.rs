@@ -228,49 +228,69 @@ pub async fn register(pooL:Pool<Postgres>) -> Result<(), Box<dyn Error>>{
     }
     Ok(())
 }
-pub async fn log(user_id: i32, _pool: Pool<Postgres>) ->Result<(), Box<dyn Error>>{
+pub async fn log(user_id: i32, _pool: Pool<Postgres>) -> Pin<Box<dyn Future<Output = Result<(), Box<dyn Error>>>>>{
+    
     println!("To create a new log, please describe your bug/issue.");
     println!("Bug name:");
     io::stdout().flush().unwrap();
 
     let mut bug_name = String::new();
     io::stdin().read_line(&mut bug_name).expect("Failed to read bug name");
-
-    println!("Bug description (type END to finish):");
-    io::stdout().flush().unwrap();
-    let mut bug_desc = String::new();
-    loop {
-        let mut line = String::new();
-        io::stdin().read_line(&mut line)?;
-        if line.trim() == "END" {
-            break;
+    Box::pin(async move{
+        let bug = sqlx::query!(
+            "SELECT name, description, status FROM bugs WHERE user_id = $1 AND name = $2",
+            user_id,
+            bug_name.trim()
+        ).fetch_optional(&_pool)
+        .await?;
+        match bug{
+            Some(bug) => {
+                eprintln!("Sorry, that bug is already logged. Run tracer update to update it.");
+                log(user_id, _pool).await.await?;
+                Ok(())
+            },
+            None => {
+                println!("Bug description (type END to finish):");
+                io::stdout().flush().unwrap();
+                let mut bug_desc = String::new();
+                loop {
+                    let mut line = String::new();
+                    io::stdin().read_line(&mut line)?;
+                    if line.trim() == "END" {
+                        break;
+                    }
+                    bug_desc.push_str(&line);
+                }
+                sqlx::query!(
+                    "INSERT INTO bugs (user_id, name, description) VALUES ($1, $2, $3)",
+                    user_id,
+                    bug_name.trim(),
+                    bug_desc.trim(),
+                )
+                .execute(&_pool)
+                .await?;
+                println!("Bug logged successfully.✅");
+                let all_bugs = sqlx::query!(
+                    "SELECT name, description, status FROM bugs WHERE user_id = $1",
+                    user_id
+                ).fetch_all(&_pool)
+                .await?;
+                println!("Here are your logged bugs:");
+                println!("  Bug Name  |  Bug Description  |  Status  ");
+                for (i, bug) in all_bugs.iter().enumerate(){
+                    println!("{}.  {}  |  {}  |  {}  ", 
+                    i+1,
+                    bug.name, 
+                    bug.description.clone().unwrap_or("no description".to_string()), 
+                    bug.status)
+                }
+                Ok(())
+            }
+            
         }
-        bug_desc.push_str(&line);
-    }
-    sqlx::query!(
-        "INSERT INTO bugs (user_id, name, description) VALUES ($1, $2, $3)",
-        user_id,
-        bug_name.trim(),
-        bug_desc.trim(),
-    )
-    .execute(&_pool)
-    .await?;
-    println!("Bug logged successfully.✅");
-    let all_bugs = sqlx::query!(
-        "SELECT name, description, status FROM bugs WHERE user_id = $1",
-        user_id
-    ).fetch_all(&_pool)
-    .await?;
-    println!("Here are your logged bugs:");
-    println!("  Bug Name  |  Bug Description  |  Status  ");
-    for (i, bug) in all_bugs.iter().enumerate(){
-        println!("{}.  {}  |  {}  |  {}  ", 
-        i+1,
-        bug.name, 
-        bug.description.clone().unwrap_or("no description".to_string()), 
-        bug.status)
-    }
-    Ok(())
+    })
+    
+    
 }
 pub async fn view(user_id: i32, POOL: Pool<Postgres>)->Result<(), Box<dyn Error>>{
 //     let rows = sqlx::query_scalar!("SELECT COUNT(*) FROM bugs WHERE user_id = $1",
@@ -294,6 +314,9 @@ pub async fn view(user_id: i32, POOL: Pool<Postgres>)->Result<(), Box<dyn Error>
     }
     Ok(())
 }
+pub async fn update(){
+
+}
 pub async fn run(items:&[String]) -> Result<(), Box<dyn Error>>{
     let _args = Args::parse_args(items).unwrap_or_else(|err| {
         eprintln!("Error parsing arguments: {}", err);
@@ -313,10 +336,7 @@ pub async fn run_in_session<'a>(items:&[String], user:AuthUser<'a>, pool:Pool<Po
         process::exit(1);
     });
     if _args.query == "log"{
-        if let Err(e) = log(*user.id, pool.clone()).await {
-            eprintln!("Application error: {}", e);
-            process::exit(1)
-        }
+        log(*user.id, pool.clone()).await.await.expect("Failed to log");
     }
     if _args.query == "view"{
         if let Err(e) = view(*user.id, pool.clone()).await{
