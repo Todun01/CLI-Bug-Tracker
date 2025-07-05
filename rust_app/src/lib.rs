@@ -1,7 +1,7 @@
 use std::{error::Error, f32::consts::E, io::{self, Write}, process};
 use bcrypt::{hash, verify, DEFAULT_COST};
 use dotenvy::dotenv;
-use sqlx::{postgres::PgPoolOptions, Pool, Postgres};
+use sqlx::{pool, postgres::PgPoolOptions, Pool, Postgres};
 use std::env;
 use rpassword::read_password;
 use std::pin::Pin;
@@ -11,7 +11,11 @@ pub struct Args{
     init_command: String,
     query: String
 }
-
+pub struct AuthUser <'a>{
+    id: & 'a i32,
+    username: & 'a String,
+    pool: Pool<Postgres>
+}
 extern crate sqlx;
 
 
@@ -31,7 +35,25 @@ impl Args  {
         if init_command != "tracer"{
             return Err(format!("{} is not a recognized command", init_command))
         }
-        let allowed_queries = vec!["start".to_string(), "log".to_string(), 
+        let allowed_query = "start".to_string();
+        if !allowed_query.contains(&query){
+            return Err(format!("{} is not a recognized command", query))
+        }
+        Ok(Args{init_command, query})
+    }
+    pub fn parse_session_args(_args: &[String]) -> Result<Args, String>{
+        if _args.len() < 2{
+            return Err(format!("You need to enter more arguments"))
+        }
+        if _args.len() > 2{
+            return Err(format!("You entered too many arguments"))
+        }
+        let init_command = _args[0].clone();
+        let query = _args[1].clone();
+        if init_command != "tracer"{
+            return Err(format!("{} is not a recognized command", init_command))
+        }
+        let allowed_queries = vec!["log".to_string(), 
         "view".to_string(), "update".to_string()];
         if !allowed_queries.contains(&query){
             return Err(format!("{} is not a recognized command", query))
@@ -113,7 +135,7 @@ pub async fn login(username:&str, _pool:Pool<Postgres>) -> Result<(), Box<dyn Er
             while !isPassword {
                 let password = read_password().unwrap();
                 match verify(&password, &user.password) {
-                    Ok(true) => {
+                    Ok(true) => {   
                         isPassword = true;
                         println!("User authenticated! Welcome {}", &user.username);
                         println!("What would you like to do today?");
@@ -126,11 +148,15 @@ pub async fn login(username:&str, _pool:Pool<Postgres>) -> Result<(), Box<dyn Er
                             .map(|s| s.trim().to_string())
                             .filter(|s| !s.is_empty())
                             .collect();
-                        items.insert(0, "tracerapp".to_string());
-                        if let Err(e) = run(&items).await{
+                        // items.insert(0, "tracerapp".to_string());
+                        let auth_user:AuthUser = AuthUser { id: &user.id, 
+                            username: &user.username, 
+                            pool: _pool.clone()};
+                        if let Err(e) = run_in_session(&items, auth_user, _pool.clone()).await{
                             eprintln!("Application error: {}", e);
                             process::exit(1);
                         }
+                        
                     },
                     Ok(false) => {
                         println!("Incorrect password.Please try again:");
@@ -195,7 +221,37 @@ pub async fn register(pooL:Pool<Postgres>) -> Result<(), Box<dyn Error>>{
     }
     Ok(())
 }
+pub async fn log(user_id: i32, _pool: Pool<Postgres>) ->Result<(), Box<dyn Error>>{
+    println!("To create a new log, please describe your bug/issue.");
+    println!("Bug name:");
+    io::stdout().flush().unwrap();
 
+    let mut bug_name = String::new();
+    io::stdin().read_line(&mut bug_name).expect("Failed to read bug name");
+
+    println!("Bug description (type END to finish):");
+    io::stdout().flush().unwrap();
+    let mut bug_desc = String::new();
+    loop {
+        let mut line = String::new();
+        io::stdin().read_line(&mut line)?;
+        if line.trim() == "END" {
+            break;
+        }
+        bug_desc.push_str(&line);
+    }
+    sqlx::query!(
+        "INSERT INTO bugs (user_id, name, description) VALUES ($1, $2, $3)",
+        user_id,
+        bug_name.trim(),
+        bug_desc.trim(),
+    )
+    .execute(&_pool)
+    .await?;
+
+    println!("Bug logged successfully.✅");
+    Ok(())
+}
 pub async fn run(items:&[String]) -> Result<(), Box<dyn Error>>{
     let _args = Args::parse_args(items).unwrap_or_else(|err| {
         eprintln!("Error parsing arguments: {}", err);
@@ -206,8 +262,19 @@ pub async fn run(items:&[String]) -> Result<(), Box<dyn Error>>{
         println!("🔧 Welcome to TRACER: A CLI BUg Tracker🔧");
         start().await.await.expect("Failed to start");
     }
+    
+    Ok(())
+}
+pub async fn run_in_session<'a>(items:&[String], user:AuthUser<'a>, pool:Pool<Postgres>) -> Result<(), Box<dyn Error>>{
+    let _args = Args::parse_session_args(items).unwrap_or_else(|err| {
+        eprintln!("Error parsing arguments: {}", err);
+        process::exit(1);
+    });
     if _args.query == "log"{
-        println!("Log something")
+        if let Err(e) = log(*user.id, pool).await {
+            eprintln!("Application error: {}", e);
+            process::exit(1)
+        }
     }
     Ok(())
 }

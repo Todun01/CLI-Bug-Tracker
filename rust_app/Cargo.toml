@@ -12,3 +12,4 @@ jsonwebtoken = "9" # for JWT auth
 serde = { version = "1", features = ["derive"] }
 chrono = "0.4"
 rpassword = "7.2"
+once_cell = "1.17"
