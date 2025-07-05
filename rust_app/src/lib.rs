@@ -54,7 +54,7 @@ impl Args  {
             return Err(format!("{} is not a recognized command", init_command))
         }
         let allowed_queries = vec!["log".to_string(), 
-        "view".to_string(), "update".to_string()];
+        "view".to_string(), "update".to_string(), "delete".to_string()];
         if !allowed_queries.contains(&query){
             println!("Allowed commands: {}", allowed_queries.join(","));
             return Err(format!("{} is not a recognized command", query))
@@ -152,7 +152,7 @@ pub async fn login(username:&str, _pool:Pool<Postgres>) -> Result<(), Box<dyn Er
                     Ok(true) => {   
                         isPassword = true;
                         println!("User authenticated! Welcome {}", &user.username);
-                        println!("What would you like to do today?");
+                        println!("What would you like to do today?(e.g tracer log)");
                         io::stdout().flush().unwrap();
                         let mut command = String::new();
                         io::stdin().read_line(&mut command).expect("Error reading command");
@@ -299,7 +299,7 @@ pub async fn log(user_id: i32, _pool: Pool<Postgres>) -> Pin<Box<dyn Future<Outp
     
     
 }
-pub async fn view(user_id: i32, POOL: Pool<Postgres>)->Result<(), Box<dyn Error>>{
+pub async fn view(user_id: i32, pool: Pool<Postgres>)->Result<(), Box<dyn Error>>{
 //     let rows = sqlx::query_scalar!("SELECT COUNT(*) FROM bugs WHERE user_id = $1",
 //     user_id
 // )
@@ -308,8 +308,23 @@ pub async fn view(user_id: i32, POOL: Pool<Postgres>)->Result<(), Box<dyn Error>
     let all_bugs = sqlx::query!(
         "SELECT name, description, status FROM bugs WHERE user_id = $1",
         user_id
-    ).fetch_all(&POOL)
+    ).fetch_all(&pool)
     .await?;
+    if all_bugs.is_empty(){
+        println!("You haven't logged any bugs.");
+        println!("Do you wish to log a bug?(Y/n)");
+
+        let response = get_response().unwrap().trim().to_string();
+        if response.eq_ignore_ascii_case("Y"){
+            log(user_id, pool.clone()).await.await.expect("Failed to log");
+        } else if response.eq_ignore_ascii_case("n"){
+            process::exit(1);
+        }else{
+            println!("{} is not a recognized command.", response);
+            process::exit(1);
+        }
+
+    }
     println!("Here are your logged bugs:");
     println!("  Bug Name  |  Bug Description  |  Status  ");
     for (i, bug) in all_bugs.iter().enumerate(){
@@ -455,6 +470,80 @@ pub async fn update(user_id: i32, pooL:Pool<Postgres>)-> Pin<Box<dyn Future<Outp
     Ok(())
     })
 }
+pub async fn delete(user_id: i32, pooL:Pool<Postgres>)-> Pin<Box<dyn Future<Output = Result<(), Box<dyn Error>>>>>{
+    if let Err(e) = view(user_id, pooL.clone()).await{
+        eprintln!("Application error: {}", e);
+        process::exit(1)
+    }
+    println!("Which bug would you like to delete?(bug name)");
+    let bug_name = get_response().unwrap().trim().to_string();
+    Box::pin(async move{
+        let user = sqlx::query!(
+            "SELECT password FROM users where id = $1",
+            user_id
+        ).fetch_one(&pooL)
+        .await?;
+        let id = sqlx::query!(
+            "SELECT id FROM bugs WHERE name = $1 AND user_id = $2",
+            bug_name,
+            user_id
+        ).fetch_optional(&pooL)
+        .await?;
+        match id{
+            Some(bug) => {
+                println!("Please enter your password to confirm action:");
+                let mut is_password = false;
+                while !is_password{
+                    let password = read_password().unwrap();
+                    match verify(password, &user.password) {
+                        Ok(true) => {
+                            is_password = true;
+                            println!("Confirmed.");
+                            let delete = sqlx::query!(
+                                "DELETE FROM bugs where id = $1 AND user_id = $2",
+                                bug.id,
+                                user_id
+                            ).execute(&pooL)
+                            .await?;
+                            if delete.rows_affected() == 0{
+                                eprintln!("Failed to delete bug.");
+                                process::exit(1);
+                            } else{
+                                println!("Bug deleted successfully!");
+                                view(user_id, pooL.clone()).await?;
+                                process::exit(1);
+                            }
+                        },
+                        Ok(false) => {
+                            println!("Incorrect password. Please try again");
+                        },
+                        Err(_) => {
+                            eprintln!("Failed to verify password, please try again.");
+                        }
+                    }
+                }
+                
+            },
+            None => {
+                println!("Bug not found.");
+                println!("DO you wish to create it?(Y/n)");
+
+                let response = get_response().unwrap().trim().to_string();
+                if response.to_uppercase().eq_ignore_ascii_case("Y"){
+                    log(user_id, pooL.clone()).await.await.expect("Failed to log");
+                } else if response.to_lowercase().eq_ignore_ascii_case("n") {
+                    process::exit(1);
+                } else{
+                    eprintln!("{} is not a recognized response", response);
+                    process::exit(1);
+                }
+            }
+        }
+
+        Ok(())
+    })
+    
+}
 pub async fn run(items:&[String]) -> Result<(), Box<dyn Error>>{
     let _args = Args::parse_args(items).unwrap_or_else(|err| {
         eprintln!("Error parsing arguments: {}", err);
@@ -482,7 +571,9 @@ pub async fn run_in_session<'a>(items:&[String], user:AuthUser<'a>, pool:Pool<Po
             process::exit(1)
         } 
     } else if _args.query == "update"{
-        update(*user.id, pool.clone()).await.await.expect("Failed to update.")
+        update(*user.id, pool.clone()).await.await.expect("Failed to update.");
+    } else if _args.query == "delete"{
+        delete(*user.id, pool.clone()).await.await.expect("Failed to delete");
     }
     Ok(())
 }
@@ -500,7 +591,7 @@ fn login_test(){
 
 #[test]
 
-fn hasing(){
+fn hashing(){
     let hashed = hash("1234", DEFAULT_COST).unwrap();
     println!("Hashed: {}", hashed);
 }

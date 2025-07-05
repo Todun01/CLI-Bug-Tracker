@@ -1,0 +1,1 @@
+fn(i32, Pool<Postgres>) -> impl Future<Output = Pin<Box<(dyn Future<Output = Result<(), Box<(dyn std::error::Error + 'static)>>> + 'static)>>> {update}
