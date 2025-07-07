@@ -1,1 +1,5 @@
-.env
+// ENV FILE
+rust_app/.env
+
+// TARGET
+rustapp/target/
