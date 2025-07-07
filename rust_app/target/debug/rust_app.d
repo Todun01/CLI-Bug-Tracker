@@ -1,1 +1,0 @@
-/home/oluwatodunni/Documents/CLI-Bug-Tracker/rust_app/target/debug/rust_app: /home/oluwatodunni/Documents/CLI-Bug-Tracker/rust_app/src/lib.rs /home/oluwatodunni/Documents/CLI-Bug-Tracker/rust_app/src/main.rs

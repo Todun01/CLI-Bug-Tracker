@@ -2,4 +2,4 @@
 rust_app/.env
 
 // TARGET
-rustapp/target/
+rust_app/target/
